@@ -1,6 +1,7 @@
 import { ThemedView } from '@/components/themed-view';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { useMeetingContext } from '../../context/meeting-context';
 
 const SETTINGS_SECTIONS = [
     {
@@ -43,6 +44,11 @@ const SETTINGS_SECTIONS = [
 export default function SettingsScreen() {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
+    const {
+        recordingPreferences,
+        setSaveRawAudioPreference,
+        setRetentionDaysPreference,
+    } = useMeetingContext();
 
     const styles = StyleSheet.create({
         container: {
@@ -198,6 +204,71 @@ export default function SettingsScreen() {
             color: isDark ? '#999' : '#ccc',
             opacity: 0.6,
         },
+        recordingCard: {
+            backgroundColor: isDark ? '#3a2a20' : '#fff',
+            borderRadius: 12,
+            borderColor: isDark ? '#5a3a2a' : '#e5e5ea',
+            borderWidth: 1,
+            paddingVertical: 12,
+            paddingHorizontal: 12,
+            marginBottom: 16,
+        },
+        recordingRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+        },
+        recordingTextWrap: {
+            flex: 1,
+        },
+        recordingLabel: {
+            fontSize: 13,
+            fontWeight: '600',
+            color: isDark ? '#fff' : '#000',
+        },
+        recordingDescription: {
+            marginTop: 2,
+            fontSize: 11,
+            color: isDark ? '#999' : '#666',
+        },
+        retentionWrap: {
+            marginTop: 12,
+            borderTopColor: isDark ? '#5a3a2a' : '#e5e5ea',
+            borderTopWidth: 1,
+            paddingTop: 12,
+        },
+        retentionTitle: {
+            fontSize: 11,
+            fontWeight: '700',
+            color: isDark ? '#aaa' : '#666',
+            textTransform: 'uppercase',
+            marginBottom: 8,
+        },
+        retentionChips: {
+            flexDirection: 'row',
+            gap: 8,
+        },
+        retentionChip: {
+            borderRadius: 999,
+            borderWidth: 1,
+            borderColor: isDark ? '#5a3a2a' : '#ddd',
+            backgroundColor: isDark ? '#2f221a' : '#fafafa',
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+        },
+        retentionChipActive: {
+            backgroundColor: '#ec5b13',
+            borderColor: '#ec5b13',
+        },
+        retentionChipText: {
+            color: isDark ? '#fff' : '#333',
+            fontSize: 11,
+            fontWeight: '700',
+        },
+        retentionChipTextActive: {
+            color: '#fff',
+        },
     });
 
     return (
@@ -251,6 +322,49 @@ export default function SettingsScreen() {
                         </View>
                     </View>
                 ))}
+
+                <View>
+                    <Text style={styles.sectionTitle}>Recording</Text>
+                    <View style={styles.recordingCard}>
+                        <View style={styles.recordingRow}>
+                            <View style={styles.recordingTextWrap}>
+                                <Text style={styles.recordingLabel}>Save raw recording (for playback)</Text>
+                                <Text style={styles.recordingDescription}>
+                                    UI option only for now. Storage behavior will be connected later.
+                                </Text>
+                            </View>
+                            <Switch
+                                value={recordingPreferences.saveRawAudio}
+                                onValueChange={setSaveRawAudioPreference}
+                                trackColor={{ false: isDark ? '#5a3a2a' : '#d3d3d3', true: '#ec5b13' }}
+                                thumbColor="#ffffff"
+                            />
+                        </View>
+
+                        <View style={[styles.retentionWrap, { opacity: recordingPreferences.saveRawAudio ? 1 : 0.45 }]}>
+                            <Text style={styles.retentionTitle}>Retention Period</Text>
+                            <View style={styles.retentionChips}>
+                                {([7, 30, 90] as const).map((days) => {
+                                    const active = recordingPreferences.retentionDays === days;
+                                    return (
+                                        <TouchableOpacity
+                                            key={days}
+                                            style={[styles.retentionChip, active && styles.retentionChipActive]}
+                                            onPress={() => setRetentionDaysPreference(days)}>
+                                            <Text
+                                                style={[
+                                                    styles.retentionChipText,
+                                                    active && styles.retentionChipTextActive,
+                                                ]}>
+                                                {days} days
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                        </View>
+                    </View>
+                </View>
             </ScrollView>
         </ThemedView>
     );

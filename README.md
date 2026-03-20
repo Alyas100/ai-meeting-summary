@@ -1,50 +1,70 @@
-# Welcome to your Expo app 👋
+# AI Meeting Summary
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+AI Meeting Summary is a cross-platform Expo app that helps users record meetings, capture transcript text, and generate concise summary bullets after each session.
 
-## Get started
+The product is based on the `stitch/` design screens and implemented as a full React Native + Expo Router application with real state management and persistence.
 
-1. Install dependencies
+## What This App Does
 
-   ```bash
-   npm install
-   ```
+- Starts and tracks live meeting recordings with timer and active session UI.
+- Captures transcript content from microphone speech recognition (web and native path).
+- Generates summary bullets from transcript content when recording is stopped.
+- Stores meeting history with searchable and sortable list views.
+- Supports favorites and per-meeting detail pages.
+- Optionally saves raw audio locally with configurable retention policy.
 
-2. Start the app
+## Main Screens
 
-   ```bash
-   npx expo start
-   ```
+- `Home`: Start recording, search meetings, filter by status, sort by date, open meeting detail.
+- `Recording`: Live timer, transcript controls, stop flow, and raw audio capture.
+- `Summary`: Displays latest generated summary and supports voice playback on web.
+- `Favorites`: Quick access to favorited meetings with search.
+- `Settings`: Recording preferences, including local raw audio save and retention days.
+- `Meeting Detail`: Per-meeting summary, transcript, and saved recording playback.
 
-In the output, you'll find options to open the app in a
+## Tech Stack
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- Expo + React Native + TypeScript
+- Expo Router (file-based navigation)
+- AsyncStorage for local persistence
+- `@react-native-voice/voice` for native speech recognition path
+- Browser Speech Recognition + Speech Synthesis for web voice features
+- `expo-av` for recording/playback
+- `expo-file-system` for local file handling on device
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## Local Data and Privacy
 
-## Get a fresh project
+- Meetings, summaries, transcript text, favorites, and preferences are stored locally.
+- Raw audio saving is optional and controlled in `Settings`.
+- Retention policy can be set to `7`, `30`, or `90` days.
+- Expired saved recordings are cleaned up automatically.
 
-When you're ready, run:
+## Run the Project
+
+1. Install dependencies:
 
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+2. Start Expo:
 
-## Learn more
+```bash
+npm run start
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+3. Launch target platform:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- Web: `npm run web`
+- Android: `npm run android`
+- iOS: `npm run ios`
 
-## Join the community
+## Notes
 
-Join our community of developers creating universal apps.
+- Native voice features require a native build/dev client workflow.
+- Web raw audio recording uses browser media APIs; behavior depends on browser microphone permissions.
+- For linting:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+npm run lint
+```

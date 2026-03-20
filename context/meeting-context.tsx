@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
 import React, { createContext, PropsWithChildren, useContext, useEffect, useMemo, useState } from 'react';
 
 export type MeetingStatus = 'Summary Ready' | 'Processing';
+export type RetentionDays = 7 | 30 | 90;
 
 export type MeetingItem = {
     id: string;
@@ -15,13 +17,27 @@ export type MeetingItem = {
     createdAt?: number;
 };
 
+export type RecordingPreferences = {
+    saveRawAudio: boolean;
+    retentionDays: RetentionDays;
+};
+
+export type RecordingAsset = {
+    uri: string;
+    createdAt: number;
+    expiresAt: number;
+};
+
 type MeetingSummariesMap = Record<string, string[]>;
 type MeetingTranscriptsMap = Record<string, string>;
+type MeetingRecordingsMap = Record<string, RecordingAsset>;
 
 type MeetingContextValue = {
     meetings: MeetingItem[];
     meetingSummariesById: MeetingSummariesMap;
     meetingTranscriptsById: MeetingTranscriptsMap;
+    meetingRecordingsById: MeetingRecordingsMap;
+    recordingPreferences: RecordingPreferences;
     isRecording: boolean;
     activeMeetingTitle: string;
     recordingStartedAt: number | null;
@@ -34,6 +50,10 @@ type MeetingContextValue = {
     toggleFavorite: (meetingId: string) => void;
     getSummaryForMeeting: (meetingId?: string) => string[];
     getTranscriptForMeeting: (meetingId?: string) => string;
+    getRecordingForMeeting: (meetingId?: string) => RecordingAsset | undefined;
+    attachRecordingToMeeting: (meetingId: string, tempUri: string) => Promise<string | undefined>;
+    setSaveRawAudioPreference: (value: boolean) => void;
+    setRetentionDaysPreference: (days: RetentionDays) => void;
 };
 
 const DEFAULT_MEETINGS: MeetingItem[] = [
@@ -81,6 +101,13 @@ const DEFAULT_BULLETS = [
 
 const DEFAULT_TRANSCRIPT =
     'Project updates were shared. The team discussed priorities, blockers, and ownership for action items.';
+
+const DEFAULT_RECORDING_PREFERENCES: RecordingPreferences = {
+    saveRawAudio: false,
+    retentionDays: 30,
+};
+
+const RECORDINGS_DIR = `${FileSystem.documentDirectory}meeting-recordings/`;
 
 function makeFallbackSummary(title: string, durationSeconds: number): string[] {
     const mins = Math.max(1, Math.round(durationSeconds / 60));
@@ -136,6 +163,8 @@ const MEETINGS_STORAGE_KEY = 'ai-meeting-summary/meetings';
 const SUMMARY_STORAGE_KEY = 'ai-meeting-summary/latest-summary';
 const SUMMARY_BY_ID_STORAGE_KEY = 'ai-meeting-summary/summaries-by-id';
 const TRANSCRIPT_BY_ID_STORAGE_KEY = 'ai-meeting-summary/transcripts-by-id';
+const RECORDING_PREF_STORAGE_KEY = 'ai-meeting-summary/recording-preferences';
+const RECORDINGS_BY_ID_STORAGE_KEY = 'ai-meeting-summary/recordings-by-id';
 
 const MeetingContext = createContext<MeetingContextValue | undefined>(undefined);
 
@@ -152,6 +181,8 @@ export function MeetingProvider({ children }: PropsWithChildren) {
     const [meetings, setMeetings] = useState<MeetingItem[]>(DEFAULT_MEETINGS);
     const [meetingSummariesById, setMeetingSummariesById] = useState<MeetingSummariesMap>(DEFAULT_SUMMARY_BY_ID);
     const [meetingTranscriptsById, setMeetingTranscriptsById] = useState<MeetingTranscriptsMap>(DEFAULT_TRANSCRIPT_BY_ID);
+    const [meetingRecordingsById, setMeetingRecordingsById] = useState<MeetingRecordingsMap>({});
+    const [recordingPreferences, setRecordingPreferences] = useState<RecordingPreferences>(DEFAULT_RECORDING_PREFERENCES);
     const [isRecording, setIsRecording] = useState(false);
     const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null);
     const [activeMeetingTitle, setActiveMeetingTitle] = useState('Team Sync - Q3 Planning');
@@ -164,11 +195,20 @@ export function MeetingProvider({ children }: PropsWithChildren) {
 
         const hydrate = async () => {
             try {
-                const [storedMeetings, storedBullets, storedSummaryMap, storedTranscriptMap] = await Promise.all([
+                const [
+                    storedMeetings,
+                    storedBullets,
+                    storedSummaryMap,
+                    storedTranscriptMap,
+                    storedPref,
+                    storedRecordingMap,
+                ] = await Promise.all([
                     AsyncStorage.getItem(MEETINGS_STORAGE_KEY),
                     AsyncStorage.getItem(SUMMARY_STORAGE_KEY),
                     AsyncStorage.getItem(SUMMARY_BY_ID_STORAGE_KEY),
                     AsyncStorage.getItem(TRANSCRIPT_BY_ID_STORAGE_KEY),
+                    AsyncStorage.getItem(RECORDING_PREF_STORAGE_KEY),
+                    AsyncStorage.getItem(RECORDINGS_BY_ID_STORAGE_KEY),
                 ]);
 
                 if (storedMeetings && isMounted) {
@@ -196,6 +236,25 @@ export function MeetingProvider({ children }: PropsWithChildren) {
                     const parsedTranscriptMap = JSON.parse(storedTranscriptMap) as MeetingTranscriptsMap;
                     if (parsedTranscriptMap && typeof parsedTranscriptMap === 'object') {
                         setMeetingTranscriptsById(parsedTranscriptMap);
+                    }
+                }
+
+                if (storedPref && isMounted) {
+                    const parsedPref = JSON.parse(storedPref) as RecordingPreferences;
+                    if (parsedPref && typeof parsedPref === 'object') {
+                        setRecordingPreferences({
+                            saveRawAudio: Boolean(parsedPref.saveRawAudio),
+                            retentionDays: ([7, 30, 90] as number[]).includes(Number(parsedPref.retentionDays))
+                                ? (Number(parsedPref.retentionDays) as RetentionDays)
+                                : 30,
+                        });
+                    }
+                }
+
+                if (storedRecordingMap && isMounted) {
+                    const parsedRecordingMap = JSON.parse(storedRecordingMap) as MeetingRecordingsMap;
+                    if (parsedRecordingMap && typeof parsedRecordingMap === 'object') {
+                        setMeetingRecordingsById(parsedRecordingMap);
                     }
                 }
             } catch {
@@ -241,6 +300,63 @@ export function MeetingProvider({ children }: PropsWithChildren) {
         }
         AsyncStorage.setItem(TRANSCRIPT_BY_ID_STORAGE_KEY, JSON.stringify(meetingTranscriptsById)).catch(() => { });
     }, [meetingTranscriptsById, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) {
+            return;
+        }
+        AsyncStorage.setItem(RECORDING_PREF_STORAGE_KEY, JSON.stringify(recordingPreferences)).catch(() => { });
+    }, [recordingPreferences, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) {
+            return;
+        }
+        AsyncStorage.setItem(RECORDINGS_BY_ID_STORAGE_KEY, JSON.stringify(meetingRecordingsById)).catch(() => { });
+    }, [meetingRecordingsById, hydrated]);
+
+    useEffect(() => {
+        if (!hydrated) {
+            return;
+        }
+
+        const pruneExpired = async () => {
+            const cutoff = Date.now() - recordingPreferences.retentionDays * 24 * 60 * 60 * 1000;
+            const entries = Object.entries(meetingRecordingsById);
+            const expired = entries.filter(([, asset]) => asset.createdAt < cutoff);
+
+            if (expired.length === 0) {
+                return;
+            }
+
+            await Promise.all(
+                expired.map(([, asset]) =>
+                    asset.uri.startsWith('blob:')
+                        ? Promise.resolve().then(() => {
+                            const urlApi = (globalThis as any).URL;
+                            if (urlApi?.revokeObjectURL) {
+                                urlApi.revokeObjectURL(asset.uri);
+                            }
+                        })
+                        : FileSystem.deleteAsync(asset.uri, { idempotent: true }).catch(() => {
+                            return;
+                        })
+                )
+            );
+
+            setMeetingRecordingsById((prev) => {
+                const next = { ...prev };
+                for (const [meetingId] of expired) {
+                    delete next[meetingId];
+                }
+                return next;
+            });
+        };
+
+        pruneExpired().catch(() => {
+            // Ignore cleanup failures and continue app flow.
+        });
+    }, [recordingPreferences.retentionDays, meetingRecordingsById, hydrated]);
 
     const startRecording = (title?: string) => {
         if (isRecording) {
@@ -309,6 +425,57 @@ export function MeetingProvider({ children }: PropsWithChildren) {
         return nextMeeting.id;
     };
 
+    const attachRecordingToMeeting = async (meetingId: string, tempUri: string) => {
+        if (!recordingPreferences.saveRawAudio || !tempUri) {
+            return undefined;
+        }
+
+        try {
+            const createdAt = Date.now();
+            const expiresAt = createdAt + recordingPreferences.retentionDays * 24 * 60 * 60 * 1000;
+
+            if (tempUri.startsWith('blob:')) {
+                setMeetingRecordingsById((prev) => ({
+                    ...prev,
+                    [meetingId]: {
+                        uri: tempUri,
+                        createdAt,
+                        expiresAt,
+                    },
+                }));
+
+                return tempUri;
+            }
+
+            const dirInfo = await FileSystem.getInfoAsync(RECORDINGS_DIR);
+            if (!dirInfo.exists) {
+                await FileSystem.makeDirectoryAsync(RECORDINGS_DIR, { intermediates: true });
+            }
+
+            const extension = tempUri.includes('.') ? tempUri.substring(tempUri.lastIndexOf('.')) : '.m4a';
+            const safeExt = extension.length <= 6 ? extension : '.m4a';
+            const targetUri = `${RECORDINGS_DIR}${meetingId}${safeExt}`;
+
+            await FileSystem.copyAsync({
+                from: tempUri,
+                to: targetUri,
+            });
+
+            setMeetingRecordingsById((prev) => ({
+                ...prev,
+                [meetingId]: {
+                    uri: targetUri,
+                    createdAt,
+                    expiresAt,
+                },
+            }));
+
+            return targetUri;
+        } catch {
+            return undefined;
+        }
+    };
+
     const getSummaryForMeeting = (meetingId?: string) => {
         if (!meetingId) {
             return latestSummaryBullets;
@@ -321,6 +488,13 @@ export function MeetingProvider({ children }: PropsWithChildren) {
             return currentTranscript;
         }
         return meetingTranscriptsById[meetingId] ?? '';
+    };
+
+    const getRecordingForMeeting = (meetingId?: string) => {
+        if (!meetingId) {
+            return undefined;
+        }
+        return meetingRecordingsById[meetingId];
     };
 
     const toggleFavorite = (meetingId: string) => {
@@ -336,11 +510,27 @@ export function MeetingProvider({ children }: PropsWithChildren) {
         );
     };
 
+    const setSaveRawAudioPreference = (value: boolean) => {
+        setRecordingPreferences((prev) => ({
+            ...prev,
+            saveRawAudio: value,
+        }));
+    };
+
+    const setRetentionDaysPreference = (days: RetentionDays) => {
+        setRecordingPreferences((prev) => ({
+            ...prev,
+            retentionDays: days,
+        }));
+    };
+
     const value = useMemo(
         () => ({
             meetings,
             meetingSummariesById,
             meetingTranscriptsById,
+            meetingRecordingsById,
+            recordingPreferences,
             isRecording,
             activeMeetingTitle,
             recordingStartedAt,
@@ -353,11 +543,17 @@ export function MeetingProvider({ children }: PropsWithChildren) {
             toggleFavorite,
             getSummaryForMeeting,
             getTranscriptForMeeting,
+            getRecordingForMeeting,
+            attachRecordingToMeeting,
+            setSaveRawAudioPreference,
+            setRetentionDaysPreference,
         }),
         [
             meetings,
             meetingSummariesById,
             meetingTranscriptsById,
+            meetingRecordingsById,
+            recordingPreferences,
             isRecording,
             activeMeetingTitle,
             recordingStartedAt,

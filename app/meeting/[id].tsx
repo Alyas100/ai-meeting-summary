@@ -1,20 +1,23 @@
 import { ThemedView } from '@/components/themed-view';
+import { MeetingItem, useMeetingContext } from '@/context/meeting-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Audio } from 'expo-av';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useMeetingContext } from '../../context/meeting-context';
 
 export default function MeetingDetailScreen() {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
     const { id } = useLocalSearchParams<{ id?: string }>();
-    const { meetings, getSummaryForMeeting, getTranscriptForMeeting } = useMeetingContext();
+    const { meetings, getSummaryForMeeting, getTranscriptForMeeting, getRecordingForMeeting } = useMeetingContext();
     const [isSpeaking, setIsSpeaking] = useState(false);
+    const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
-    const meeting = meetings.find((item) => item.id === id);
+    const meeting = meetings.find((item: MeetingItem) => item.id === id);
     const summaryBullets = getSummaryForMeeting(id);
     const transcript = getTranscriptForMeeting(id);
+    const rawRecording = getRecordingForMeeting(id);
 
     const speakSummary = () => {
         if (isSpeaking) {
@@ -36,6 +39,32 @@ export default function MeetingDetailScreen() {
 
         setIsSpeaking(true);
         (globalThis as any).speechSynthesis.speak(utterance);
+    };
+
+    const playSavedAudio = async () => {
+        if (!rawRecording?.uri) {
+            return;
+        }
+
+        if (isPlayingAudio) {
+            await Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => { });
+            setIsPlayingAudio(false);
+            return;
+        }
+
+        try {
+            setIsPlayingAudio(true);
+            const soundResult = await Audio.Sound.createAsync({ uri: rawRecording.uri });
+            await soundResult.sound.playAsync();
+            soundResult.sound.setOnPlaybackStatusUpdate((status) => {
+                if (!status.isLoaded || status.didJustFinish) {
+                    setIsPlayingAudio(false);
+                    void soundResult.sound.unloadAsync();
+                }
+            });
+        } catch {
+            setIsPlayingAudio(false);
+        }
     };
 
     const styles = StyleSheet.create({
@@ -188,6 +217,16 @@ export default function MeetingDetailScreen() {
                                             : 'Voice on Web'}
                                 </Text>
                             </TouchableOpacity>
+
+                            {rawRecording?.uri && (
+                                <TouchableOpacity
+                                    style={[styles.playButton, { backgroundColor: isPlayingAudio ? '#FF453A' : '#0A84FF' }]}
+                                    onPress={playSavedAudio}>
+                                    <Text style={styles.playButtonText}>
+                                        {isPlayingAudio ? 'Stop Saved Audio' : 'Play Saved Recording'}
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
 
                         <View style={styles.card}>
@@ -196,7 +235,7 @@ export default function MeetingDetailScreen() {
                                 <Text style={styles.summaryTitle}>Summary</Text>
                             </View>
 
-                            {summaryBullets.map((bullet, idx) => (
+                            {summaryBullets.map((bullet: string, idx: number) => (
                                 <View style={styles.bulletItem} key={`detail-bullet-${idx}`}>
                                     <Text style={styles.bulletDot}>•</Text>
                                     <Text style={styles.bulletText}>{bullet}</Text>

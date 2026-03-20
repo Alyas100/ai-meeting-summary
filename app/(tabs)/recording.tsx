@@ -1,5 +1,7 @@
 import { ThemedView } from '@/components/themed-view';
+import { useMeetingContext } from '@/context/meeting-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Audio } from 'expo-av';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -13,7 +15,6 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { useMeetingContext } from '../../context/meeting-context';
 
 type SpeechRecognitionLike = {
     continuous: boolean;
@@ -55,12 +56,18 @@ export default function RecordingScreen() {
     const isDark = colorScheme === 'dark';
     const pulseAnim = useRef(new Animated.Value(0.8)).current;
     const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+    const audioRecordingRef = useRef<Audio.Recording | null>(null);
+    const webAudioRecorderRef = useRef<any>(null);
+    const webAudioStreamRef = useRef<any>(null);
+    const webAudioChunksRef = useRef<any[]>([]);
 
     const {
         isRecording,
         activeMeetingTitle,
         recordingStartedAt,
         stopRecording,
+        recordingPreferences,
+        attachRecordingToMeeting,
         currentTranscript,
         appendToCurrentTranscript,
     } = useMeetingContext();
@@ -95,6 +102,132 @@ export default function RecordingScreen() {
             setMicListening(false);
         }
     }, [isRecording]);
+
+    useEffect(() => {
+        if (!isRecording || !recordingPreferences.saveRawAudio || Platform.OS === 'web') {
+            return;
+        }
+
+        const startDeviceAudio = async () => {
+            try {
+                const permission = await Audio.requestPermissionsAsync();
+                if (!permission.granted) {
+                    setMicErrorText('Microphone permission is required to save raw recording.');
+                    return;
+                }
+
+                await Audio.setAudioModeAsync({
+                    allowsRecordingIOS: true,
+                    playsInSilentModeIOS: true,
+                });
+
+                const recording = new Audio.Recording();
+                await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+                await recording.startAsync();
+                audioRecordingRef.current = recording;
+            } catch {
+                setMicErrorText('Unable to start local raw audio recording.');
+            }
+        };
+
+        startDeviceAudio().catch(() => {
+            setMicErrorText('Unable to start local raw audio recording.');
+        });
+    }, [isRecording, recordingPreferences.saveRawAudio]);
+
+    const stopDeviceAudioRecording = async () => {
+        if (!audioRecordingRef.current) {
+            return undefined;
+        }
+
+        try {
+            await audioRecordingRef.current.stopAndUnloadAsync();
+            const uri = audioRecordingRef.current.getURI() ?? undefined;
+            audioRecordingRef.current = null;
+            return uri;
+        } catch {
+            audioRecordingRef.current = null;
+            return undefined;
+        }
+    };
+
+    const startWebAudioRecording = async () => {
+        if (!isRecording || !recordingPreferences.saveRawAudio || Platform.OS !== 'web') {
+            return;
+        }
+
+        const g = globalThis as any;
+        if (!g.navigator?.mediaDevices?.getUserMedia || !g.MediaRecorder) {
+            setMicErrorText('Browser audio capture is not available.');
+            return;
+        }
+
+        if (webAudioRecorderRef.current) {
+            return;
+        }
+
+        try {
+            const stream = await g.navigator.mediaDevices.getUserMedia({ audio: true });
+            const recorder = new g.MediaRecorder(stream);
+            webAudioChunksRef.current = [];
+
+            recorder.ondataavailable = (event: any) => {
+                if (event?.data && event.data.size > 0) {
+                    webAudioChunksRef.current.push(event.data);
+                }
+            };
+
+            recorder.start();
+            webAudioStreamRef.current = stream;
+            webAudioRecorderRef.current = recorder;
+        } catch {
+            setMicErrorText('Unable to capture browser microphone audio for saving.');
+        }
+    };
+
+    const stopWebAudioRecording = async (): Promise<string | undefined> => {
+        if (Platform.OS !== 'web' || !webAudioRecorderRef.current) {
+            return undefined;
+        }
+
+        const g = globalThis as any;
+        const recorder = webAudioRecorderRef.current;
+        const stream = webAudioStreamRef.current;
+
+        return await new Promise((resolve) => {
+            recorder.onstop = () => {
+                try {
+                    const blob = new g.Blob(webAudioChunksRef.current, { type: 'audio/webm' });
+                    const uri = g.URL?.createObjectURL ? g.URL.createObjectURL(blob) : undefined;
+                    resolve(uri);
+                } catch {
+                    resolve(undefined);
+                }
+            };
+
+            try {
+                recorder.stop();
+            } catch {
+                resolve(undefined);
+            }
+
+            if (stream?.getTracks) {
+                stream.getTracks().forEach((track: any) => track.stop());
+            }
+
+            webAudioRecorderRef.current = null;
+            webAudioStreamRef.current = null;
+            webAudioChunksRef.current = [];
+        });
+    };
+
+    useEffect(() => {
+        if (!isRecording || !recordingPreferences.saveRawAudio || Platform.OS !== 'web') {
+            return;
+        }
+
+        void startWebAudioRecording();
+    }, [isRecording, recordingPreferences.saveRawAudio]);
 
     useEffect(() => {
         if (!NativeVoice || Platform.OS === 'web') {
@@ -508,10 +641,16 @@ export default function RecordingScreen() {
 
                 <TouchableOpacity
                     style={styles.stopButton}
-                    onPress={() => {
+                    onPress={async () => {
                         stopWebMic();
                         void stopNativeMic();
+                        const rawDeviceUri = await stopDeviceAudioRecording();
+                        const rawWebUri = await stopWebAudioRecording();
+                        const rawAudioUri = rawDeviceUri ?? rawWebUri;
                         const meetingId = stopRecording();
+                        if (meetingId && rawAudioUri && recordingPreferences.saveRawAudio) {
+                            await attachRecordingToMeeting(meetingId, rawAudioUri);
+                        }
                         if (meetingId) {
                             router.push({
                                 pathname: '/meeting/[id]',
@@ -540,6 +679,18 @@ export default function RecordingScreen() {
                                 : 'Tap Start Mic to begin native device transcription.'
                             : 'Native speech package is not available yet. Run install and rebuild the app.'}
                 </Text>
+
+                {recordingPreferences.saveRawAudio && Platform.OS !== 'web' && (
+                    <Text style={styles.supportText}>
+                        Raw audio saving is ON. File will stay local and follow your retention setting.
+                    </Text>
+                )}
+
+                {recordingPreferences.saveRawAudio && Platform.OS === 'web' && (
+                    <Text style={styles.supportText}>
+                        Raw audio saving is ON for web session. Playback is available after stopping recording.
+                    </Text>
+                )}
 
                 {!!micErrorText && <Text style={[styles.supportText, { color: '#FF453A' }]}>{micErrorText}</Text>}
 

@@ -1,9 +1,9 @@
 import { ThemedView } from '@/components/themed-view';
+import { useMeetingContext } from '@/context/meeting-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useMeetingContext } from '../../context/meeting-context';
 
 export default function SummaryScreen() {
     const colorScheme = useColorScheme();
@@ -180,7 +180,7 @@ export default function SummaryScreen() {
                         <Text style={styles.summaryTitle}>Summary</Text>
                     </View>
 
-                    {latestSummaryBullets.map((bullet, idx) => (
+                    {latestSummaryBullets.map((bullet: string, idx: number) => (
                         <View style={styles.bulletItem} key={`bullet-${idx}`}>
                             <Text style={styles.bulletDot}>•</Text>
                             <Text style={styles.bulletText}>{bullet}</Text>

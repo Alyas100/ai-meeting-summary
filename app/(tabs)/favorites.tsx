@@ -1,9 +1,9 @@
 import { ThemedView } from '@/components/themed-view';
+import { MeetingItem, useMeetingContext } from '@/context/meeting-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { MeetingItem, useMeetingContext } from '../../context/meeting-context';
 
 export default function FavoritesScreen() {
     const colorScheme = useColorScheme();
