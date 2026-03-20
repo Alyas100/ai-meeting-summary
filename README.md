@@ -59,7 +59,9 @@ npm run start
 - Android: `npm run android`
 - iOS: `npm run ios`
 
-## Notes
+- # NOTE: It is preferred to use npm run web, to test out as some feature such as voice recoding and transcription not supported in mobile version due to need for native module integration.
+
+## Other Notes
 
 - Native voice features require a native build/dev client workflow.
 - Web raw audio recording uses browser media APIs; behavior depends on browser microphone permissions.
